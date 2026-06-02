@@ -1,0 +1,7 @@
+server
+*.o
+
+.vscode/
+.idea/
+
+build/
