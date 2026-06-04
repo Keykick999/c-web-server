@@ -1,49 +1,66 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <unistd.h>
 
-#include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+
+#include <sys/epoll.h>
+
+#include <fcntl.h>
+#include <errno.h>
+
 
 int main() {
-  // 소켓 생성
-  int listen_fd = socket(
-    AF_INET,
-    SOCK_STREAM,
-    0
-  );
+    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-  // 소켓에 서버 주소 설정
-  struct sockaddr_in server_addr;
-  memset(&server_addr, 0, sizeof(server_addr));
+    struct sockaddr_in addr;
 
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(8080);
-  server_addr.sin_addr.s_addr = INDDR_ANY;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8080);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-  bind(
-    listen_fd,
-    (struct socket_addr*) &server_addr,
-    sizeof(server_addr)
-  );
+    bind(
+        listen_fd,
+        (struct sockaddr*)&addr,
+        sizeof(addr)
+    );
 
-  // tcp 연결 가능하게 -> 소켓 listen 상태로 변경
-  listen(
-    listen_fd,
-    128 // backlog-queue 크기
-  );
+    listen(listen_fd, 128);
 
-  // tcp 연결 수립 -> connected socket 커널에 생성
-  // -> accept로 accept큐에 있는 connected socket의 fd 값 가져옴  
-  int client_fd = accept(
-    listen_fd,
-    NULL,
-    NULL
-  );
+    int epfd = epoll_create1(0);
 
+    struct epoll_event ev;
 
+    ev.events = EPOLLIN;
+    ev.data.fd = listen_fd;
 
+    epoll_ctl(
+        epfd,
+        EPOLL_CTL_ADD,
+        listen_fd,
+        &ev
+    );
 
+    struct epoll_event events[1024];
+
+    while (1) {
+        int n = epoll_wait(
+            epfd,
+            events,
+            1024,
+            -1
+        );
+
+        for (int i = 0; i < n; i++) {
+            if (events[i].data.fd == listen_fd) {
+                int client_fd = accept(listen_fd, NULL, NULL);
+
+                printf("client_fd: %d\n", client_fd);
+            }
+        }
+    }
 }

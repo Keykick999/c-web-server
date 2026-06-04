@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-static char* parseRequestLine(
+char* parseRequestLine(
     HttpRequest* request,
     char* buffer
 ) {
@@ -49,7 +49,7 @@ static char* parseRequestLine(
     return header + 2;
 }
 
-static char* parseHeaders(
+char* parseHeaders(
     HttpRequest* request,
     char* headerStart
 ) {
@@ -119,7 +119,7 @@ static char* parseHeaders(
     return line_start + 2;
 }
 
-static void parseBody(
+void parseBody(
     HttpRequest* request,
     char* bodyStart
 ) {

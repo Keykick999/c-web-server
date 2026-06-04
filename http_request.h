@@ -10,6 +10,8 @@ typedef struct HttpRequest {
     char* version;
 
     HashMap* headers;
+    int header_count;
+
     HashMap* body;
 
 } HttpRequest;
