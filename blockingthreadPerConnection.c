@@ -295,6 +295,7 @@ int main() {
       fd_ptr  // client_fd 값을 worker 함수의 매개변수로 넘김
     );
 
+    // 스레드 생성 실패
     if (result != 0) {
       free(fd_ptr);
       close(client_fd);
