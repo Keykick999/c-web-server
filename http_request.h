@@ -20,4 +20,8 @@ void destroyHttpRequest(
     HttpRequest* request
 );
 
+void initHttpRequest(
+    HttpRequest *request
+);
+
 #endif

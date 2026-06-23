@@ -25,8 +25,8 @@ void* worker(void* args) {
   char body[MAX_BODY] = {0};
   int body_len = 0;
   int header_len = 0;
-  int n;
   int contentLength = -1; // content-length 헤더 값
+  int n;
   HttpRequest request;
 
   request.method = NULL;
@@ -152,6 +152,7 @@ void* worker(void* args) {
   print_map(request.headers);
   print_map(request.body);
 
+  // 파싱이 다 끝났으면 객체의 정보에 맞게 필요한 정보 send로 전송
   if (strcmp(request.method, "GET") == 0 && strcmp(request.path, "/hello") == 0 
     && strcmp(request.version, "HTTP/1.1") == 0) {
     char response[] =

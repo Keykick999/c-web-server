@@ -18,3 +18,13 @@ void destroyHttpRequest(
         request->body
     );
 }
+
+void initHttpRequest(HttpRequest *request) {
+
+    request->method = NULL;
+    request->path = NULL;
+    request->version = NULL;
+
+    request->headers = create_map();
+    request->body = create_map();
+}
