@@ -64,3 +64,54 @@ int main() {
         }
     }
 }
+
+
+
+
+
+// 아래는 연습 코드
+
+// fd_set 선언
+fd_set readfds;
+
+// fd_set 초기화
+FD_ZERO(&readfds);
+
+// listen_fd fd_set에 추가
+FD_SET(listen_fd, &readfds);
+
+// client1 fd_set에 추가
+FD_SET(client1_fd, &readfds);
+
+// client2 fd_set에 추가
+FD_SET(client2_fd, &readfds);
+
+// select로 읽을 수 있는 fd 개수 가져오기 => 근데 개수를 가져와서 어디에 쓰지 fd 값들도 아니고
+int ready = select(
+    max_fd + 1,
+    &readfds,
+    NULL,
+    NULL,
+    NULL
+);
+
+// select 이후에 비트 배열에서 읽을 준비가 된 fd만 비트가 켜지도록 수정됨.
+
+// listen socket의 accept queue에 새로운 소켓이 들어옴
+if (FD_ISSET(listen_fd, &readfds)) {
+    // accept queue에서 소켓 빼고 fd 값 읽기
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    int client_fd = accept(listen_fd, (struct sockaddr_in*) &client_addr, &client_len);
+
+    // client_fd값을 fd_set에 추가
+    fd_set readfds;
+    FD_SET(client_fd, &readfds);
+
+    // max_fd 값 갱신
+    if (client_fd > max_fd) {
+        max_fd = client_fd;
+    }
+
+    }
+}
