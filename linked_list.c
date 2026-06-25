@@ -105,3 +105,20 @@ void destroyList(LinkedList *list)
 
     list->head = NULL;
 }
+
+Client* findClient(LinkedList *list, int client_fd)
+{
+    Client *curr = list->head;
+
+    while (curr != NULL)
+    {
+        if (curr->client_fd == client_fd)
+        {
+            return curr;
+        }
+
+        curr = curr->next;
+    }
+
+    return NULL;
+}

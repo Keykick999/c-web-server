@@ -8,10 +8,15 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#include <poll.h>
 #include <sys/epoll.h>
 
 #include <fcntl.h>
 #include <errno.h>
+
+#include <sys/timerfd.h>
+#include <unistd.h>
+#include <stdint.h>
 
 
 int main() {
@@ -112,6 +117,98 @@ if (FD_ISSET(listen_fd, &readfds)) {
     if (client_fd > max_fd) {
         max_fd = client_fd;
     }
+}
+
+// poll 연습 코드
+struct pollfd fds[10];
+
+fds[0].fd = client_fd;
+fds[0].events = POLLIN;
+
+int ret = poll(
+    fds,
+    1,
+    -1
+);
+
+for (int i = 0; i < count; i++) {
+    if (fds[i].revents & POLLIN) {
 
     }
 }
+
+// 1
+struct pollfd fds[1];
+fds[0].fd = STDIN_FILENO;
+fds[0].events = POLLIN;
+
+while (1) {
+    printf("Waiting...\n");
+
+    int ret = poll(fds, 1, -1);
+
+    if (ret == -1) {
+        perror("poll");
+        continue;
+    }
+
+    if (ret > 0) {
+        if (fds[0].revents & POLLIN) {
+            // 입력 받기
+            char str[100];
+            fgets(str, sizeof(str), stdin);
+
+            printf("%s", str);
+        }
+    }
+}
+
+
+// 2
+int pipefd[2];
+
+pipe(pipefd);
+
+struct pollfd fds[2];
+
+fds[0].fd = STDIN_FILENO;
+fds[0].events = POLLIN;
+
+fds[1].fd = pipefd[0];
+fds[1].events = POLLIN;
+
+while (1) {
+    int ret = poll(fds, 2, -1); 
+
+    // 이벤트 발생한 fd가 있음
+    if (ret > 0) {
+        for (int i = 0; i < 2; i++) {
+            if (fds[i].revents & POLLIN) {
+                if (i == 0) {
+                    // 입력 받기
+                    char str[100];
+                    fgets(str, sizeof(str), stdin);
+                    write(pipefd[1], str, strlen(str));
+                }
+                else if (i == 1) {
+                    char str[100];
+                    int n = read(pipefd[0], str, sizeof(str) - 1);
+                    str[n] = '\0';
+                    printf("Read from pipe : %s\n", str);
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+

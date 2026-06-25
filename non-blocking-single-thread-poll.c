@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <sys/select.h>
+#include <poll.h>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -17,26 +17,23 @@
 
 #define MAX_HEADERS 4096
 #define MAX_BODY 4096
+#define MAX_FD_SIZE 1000
 
-// max_fd 갱신
-void updateMaxFd(LinkedList *clients, int *max_fd, int listen_fd) {
-  Client* curr = clients->head;
-
-  // 모든 fd값 확인하면서 max_fd 값 갱신
-  *max_fd = listen_fd;
-  while (curr != NULL) {
-    if (curr->client_fd > *max_fd) {
-      *max_fd = curr->client_fd;
-    }
-
-    curr = curr->next;
-  }
-}
-
-void disconnectClient(int client_fd, LinkedList* clients, fd_set *master) {
+void disconnectClient(struct pollfd *fds, LinkedList* clients, int* count, int client_fd) {
   close(client_fd);
+
   removeNode(clients, client_fd);
-  FD_CLR(client_fd, master);
+
+  // 배열에서 fd가 client_fd인 위치에 마지막 요소 넣기
+  for (int i = 0; i < *count; i++) {
+    if (fds[i].fd == client_fd) {
+      fds[i] = fds[*count - 1];
+      (*count)--;
+      return;
+    }
+  }
+
+  return;
 }
 
 void setNonBlocking(int fd) {
@@ -54,7 +51,7 @@ void setNonBlocking(int fd) {
 }
 
 // 작업 스레드가 처리할 작업
-void processClient(LinkedList* clients, Client* client, fd_set *master, int* max_fd, int listen_fd) {
+void processClient(struct pollfd *fds, LinkedList* clients, Client* client, int* count) {
   char *buffer = client->buffer;
   char *headers = client->headers;
   char *body = client->body;
@@ -78,23 +75,14 @@ void processClient(LinkedList* clients, Client* client, fd_set *master, int* max
     // 그 외 에러들
     perror("recv");
 
-    disconnectClient(client->client_fd, clients, master);
+    disconnectClient(fds, clients, count, client->client_fd);
 
-    // max_fd값 갱신
-    if (*max_fd == client->client_fd) {
-      updateMaxFd(clients, max_fd, listen_fd);
-    }
     return;
   }
 
   // 연결 종료
   else if (n == 0) {
-    disconnectClient(client->client_fd, clients, master);
-
-    // max_fd값 갱신
-    if (*max_fd == client->client_fd) {
-      updateMaxFd(clients, max_fd, listen_fd);
-    }
+    disconnectClient(fds, clients, count, client->client_fd);
     return;
   }
 
@@ -254,12 +242,7 @@ void processClient(LinkedList* clients, Client* client, fd_set *master, int* max
   }
 
   // http 1.0 기준으로 구현 했음
-  disconnectClient(client->client_fd, clients, master);
-
-  // max_fd값 갱신
-  if (*max_fd == client->client_fd) {
-    updateMaxFd(clients, max_fd, listen_fd);
-  }
+  disconnectClient(fds, clients, count, client->client_fd);
 
   return;
 }
@@ -272,11 +255,9 @@ int main() {
   LinkedList clients;
   initList(&clients);
 
-  // fd set 선언
-  fd_set readfds; // select에서 사용하기 위한 용도
-  fd_set master;
-  FD_ZERO(&readfds);
-  FD_ZERO(&master);
+  // fd 관리 자료구조
+  struct pollfd fds[MAX_FD_SIZE];
+  int count = 0;  // fds내의 fd 개수(새로 fd값을 넣을 위치)
 
   // 소켓 생성
   int listen_fd = socket(
@@ -325,8 +306,6 @@ int main() {
     exit(1);
   }
 
-  int max_fd = listen_fd; // select에서 사용하기 위함
-
   // tcp 연결 가능하게 -> 소켓 listen 상태로 변경
   int listenResult = listen(
     listen_fd,
@@ -340,26 +319,26 @@ int main() {
       exit(1);
   }
 
-  // listen_fd fd_set에 추가
-  FD_SET(listen_fd, &master);
+  // listen_fd fds 배열에 추가
+  fds[count].fd = listen_fd;
+  fds[count++].events = POLLIN;
 
   while (1) {
     // 읽을 수 있는 소켓들 확인
-    readfds = master; // master가 손상되지 않도록 readfds 사용
-    int readableSocketCount = select(max_fd + 1, &readfds, NULL, NULL, NULL);
+    int readableSocketCount = poll(fds, count, -1); // 읽을 수 있는 소켓 생길 때까지 무한 대기
 
-    // select 실패
+    // poll 실패
     if (readableSocketCount < 0) {
       if (errno == EINTR) {
         continue;
       }
 
-      perror("select");
+      perror("poll");
       continue;
     }
 
     // listen socket에서 읽을 데이터가 있으면 recv
-    if (FD_ISSET(listen_fd, &readfds)) {
+    if (fds[0].revents & POLLIN) {
       while(1) {
         // listen socket 처리
         int client_fd = accept(
@@ -370,9 +349,15 @@ int main() {
 
         // 연결 성공
         if (client_fd >= 0) {
+          // fd 배열 꽉 참
+          if (count >= MAX_FD_SIZE) {
+            close(client_fd);
+            
+          }
+
           // client_fd non-blocking 방식으로 설정
           setNonBlocking(client_fd);
-          
+
           // 연결 성공이면 client 구조체 생성
           Client* client = malloc(sizeof(Client));
 
@@ -385,11 +370,9 @@ int main() {
 
           addFirst(&clients, client);
 
-          // fd_set에 추가
-          FD_SET(client_fd, &master);
-          if (client_fd > max_fd) {
-            max_fd = client_fd;
-          }
+          // fds 배열에 추가
+          fds[count].fd = client_fd;
+          fds[count++].events = POLLIN;
         }
 
         // 연결 실패
@@ -405,20 +388,19 @@ int main() {
       readableSocketCount--;
     }
 
-    // client_fd들 중 읽을 데이터 있는지 전체 다 확인
-    Client* curr = clients.head;
-
-    // 연결된 모든 소켓들에 대해서 읽을 데이터 있는지 확인 후 파싱
-    while (readableSocketCount > 0 && curr != NULL) {
-      Client *next = curr->next;
-
-      // connected socket 처리
-      if (FD_ISSET(curr->client_fd, &readfds)) {
-        processClient(&clients, curr, &master, &max_fd, listen_fd);
-        readableSocketCount--;
+    // 연결된 모든 소켓들에 대해서 읽을 데이터 있는지 확인 후 파싱(listen socket은 제외)
+    for (int i = 1; i < count && readableSocketCount > 0; i++) {
+      if (!(fds[i].revents & POLLIN)) {
+        continue;
       }
 
-      curr = next;
+      Client *client = findClient(&clients, fds[i].fd);
+
+      if (client != NULL) {
+        processClient(fds, &clients, client, &count);
+      }
+      
+      readableSocketCount--;
     }
   }
 }

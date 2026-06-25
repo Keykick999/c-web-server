@@ -23,4 +23,6 @@ void removeNode(LinkedList *list, int client_fd);
 // 메모리 해제
 void destroyList(LinkedList *list);
 
+Client* findClient(LinkedList *list, int client_fd);
+
 #endif
