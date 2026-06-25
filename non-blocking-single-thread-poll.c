@@ -352,7 +352,7 @@ int main() {
           // fd 배열 꽉 참
           if (count >= MAX_FD_SIZE) {
             close(client_fd);
-            
+            continue;
           }
 
           // client_fd non-blocking 방식으로 설정
