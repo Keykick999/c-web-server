@@ -202,13 +202,109 @@ while (1) {
 }
 
 
+// 1. epoll 연습 문제
+int epfd = epoll_create1(0);
+
+if (epfd == -1) {
+    perror("epoll create1");
+    exit(1);
+}
+
+struct epoll_event{
+    uint32_t events;
+    epoll_data_t data;
+}
+
+struct epoll_event event;
+
+event.events = EPOLLIN;
+event.data.fd = client_fd;
+
+// 감시목록 수정
+epoll_ctl(
+    epfd,
+    op, // EPOLL_CTL_ADD, EPOLL_CTL_MOD, EPOLL_CTL_DEL
+    fd,
+    &event
+);
+
+int ready = epoll_wait(
+    epfd,
+    events,
+    maxevents,
+    timeout
+);
 
 
+// epoll 객체 생성
+int epfd = epoll_create1(0);
+
+struct epoll_event event;
+
+event.events = EPOLLIN;
+event.data.fd = listen_fd;
 
 
+epoll_ctl(
+    epfd,
+    EPOLL_CTL_ADD,
+    listen_fd,
+    &event
+);
 
 
+// 2
+#define MAX_EVENTS 1024
+
+struct epoll_event events[MAX_EVENTS];
+
+int ready = epoll_wait(
+    epfd,
+    events,
+    MAX_EVENTS,
+    -1
+);
+
+for (int i = 0; i < ready; i++) {
+    if (events[i].events & POLLIN) {
+        int fd = events[i].data.fd;
+        printf("%d\n", fd);
+    }
+}
 
 
+// 문제 3
+if (fd == listen_fd) {
+
+    int client_fd = accept(
+        listen_fd,
+        NULL,
+        NULL
+    );
+
+    struct epoll_event event;
+
+    event.events = EPOLLIN;
+    event.data.fd = client_fd;
+
+    epoll_ctl(
+        epfd,
+        EPOLL_CTL_ADD,
+        client_fd,
+        &event
+    );
+}
+
+// 문제 4
+if (n == 0) {
+    epoll_ctl(
+        epfd,
+        EPOLL_CTL_DEL,
+        client_fd,
+        NULL
+    );
+
+    close(client_fd);
+}
 
 
