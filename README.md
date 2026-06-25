@@ -24,10 +24,10 @@ Single Thread + Non-blocking
 select()
     │
     ▼
-poll()   ✅
+poll()
     │
     ▼
-epoll()
+epoll()   ✅
     │
     ▼
 Reactor Pattern
@@ -70,11 +70,11 @@ accept()
 pthread_create()
 ```
 
-장점
+#### 장점
 
 * 여러 클라이언트를 동시에 처리 가능
 
-단점
+#### 단점
 
 * 클라이언트 수만큼 스레드 생성
 * Context Switching 비용 증가
@@ -96,7 +96,7 @@ Job Queue
 Worker Thread
 ```
 
-장점
+#### 장점
 
 * 스레드 생성 비용 제거
 * 스레드 개수 제한 가능
@@ -142,7 +142,7 @@ fd_set
 Ready Socket
 ```
 
-구현 내용
+#### 구현 내용
 
 * `fd_set` 관리
 * `FD_SET()`
@@ -150,7 +150,7 @@ Ready Socket
 * `FD_ISSET()`
 * `FD_ZERO()`
 * `max_fd` 관리
-* Listen Socket과 Client Socket을 동시에 감시
+* Listen Socket과 Client Socket 동시 감시
 
 읽기 가능한 소켓만 처리하도록 변경하여 하나의 스레드에서 여러 클라이언트를 동시에 처리할 수 있도록 구현하였다.
 
@@ -184,13 +184,13 @@ max_fd = 50000
 0 ~ 50000
 ```
 
-전체를 검사해야 한다.
+전체를 순회해야 한다.
 
 또한
 
 * `FD_SETSIZE` 제한
-* 매번 `fd_set` 복사 필요
-* `max_fd` 관리 필요
+* 매 호출마다 `fd_set` 복사
+* `max_fd` 직접 관리
 
 등의 단점이 존재한다.
 
@@ -208,14 +208,14 @@ pollfd[]
 Ready Socket
 ```
 
-구현 내용
+#### 구현 내용
 
 * `struct pollfd` 관리
 * `events`, `revents` 이해 및 활용
-* Listen Socket과 Client Socket을 동시에 감시
+* Listen Socket과 Client Socket 동시 감시
 * `pollfd` 배열을 이용한 파일 디스크립터 관리
 * Client 연결 및 해제 시 `pollfd` 배열 관리
-* 기존 select() 서버를 poll() 기반으로 변경
+* 기존 `select()` 서버를 `poll()` 기반으로 변경
 
 #### select()와 poll()의 차이
 
@@ -231,11 +231,52 @@ Ready Socket
 * `struct pollfd` 배열 사용
 * `max_fd` 관리 불필요
 * 감시할 파일 디스크립터 개수만 전달
-* `FD_SETSIZE` 제한 없음(운영체제 자원 한도 내)
+* `FD_SETSIZE` 제한 없음 (운영체제 자원 한도 내)
 
-하지만 `poll()` 역시 등록된 모든 파일 디스크립터를 순회하면서 이벤트를 확인하기 때문에 시간 복잡도는 여전히 **O(n)** 이다.
+하지만 `poll()` 역시 등록된 모든 파일 디스크립터를 순회하면서 이벤트를 확인하기 때문에 시간 복잡도는 **O(n)** 이다.
 
-이러한 한계를 해결하기 위해 Linux에서는 `epoll()`을 제공한다.
+---
+
+### 7. epoll()
+
+Linux에서 제공하는 `epoll()` 기반의 I/O Multiplexing으로 서버를 변경하였다.
+
+```text
+Interest List
+        │
+epoll_wait()
+        │
+ Ready Socket
+```
+
+#### 구현 내용
+
+* `epoll_create1()`
+* `epoll_ctl()`
+
+  * `EPOLL_CTL_ADD`
+  * `EPOLL_CTL_DEL`
+* `epoll_wait()`
+* Listen Socket과 Client Socket 동시 감시
+* Client 연결 및 해제 시 epoll Interest List 관리
+* 기존 `poll()` 서버를 `epoll()` 기반으로 변경
+* `EPOLLERR`, `EPOLLHUP` 예외 처리
+
+#### poll()와 epoll()의 차이
+
+**poll()**
+
+* 모든 파일 디스크립터를 순회
+* 이벤트가 발생하지 않은 소켓도 검사
+* 시간 복잡도 **O(n)**
+
+**epoll()**
+
+* 커널이 Ready 상태의 파일 디스크립터만 관리
+* 이벤트가 발생한 소켓만 사용자 공간으로 전달
+* 대규모 동시 접속 환경에서 높은 성능 제공
+
+`epoll()`은 `poll()`처럼 모든 파일 디스크립터를 순회하지 않고, 이벤트가 발생한 파일 디스크립터만 반환하므로 많은 연결을 처리하는 서버에서 훨씬 효율적으로 동작한다.
 
 ---
 
@@ -245,7 +286,11 @@ Ready Socket
 * Non-blocking I/O
 * Thread-per-Connection
 * Thread Pool
-* I/O Multiplexing (`select`, `poll`)
+* I/O Multiplexing
+
+  * `select()`
+  * `poll()`
+  * `epoll()`
 * HTTP Request Parsing
 * Partial Read 처리
 * Non-blocking Socket 처리
@@ -255,16 +300,27 @@ Ready Socket
 
 ## 앞으로 진행할 내용
 
-* [x] poll()
-* [ ] epoll()
+* [x] `poll()`
+
+* [x] `epoll()`
 
   * `epoll_create1()`
   * `epoll_ctl()`
   * `epoll_wait()`
-  * Level Trigger
-  * Edge Trigger
-  * poll() → epoll() 변환
+  * `EPOLL_CTL_ADD`
+  * `EPOLL_CTL_DEL`
+  * `poll()` → `epoll()` 변환
+
+* [ ] Level Trigger (LT)
+
+* [ ] Edge Trigger (ET)
+
+* [ ] `epoll_event.data.ptr` 활용
+
 * [ ] Reactor Pattern
+
 * [ ] Java NIO Selector
+
 * [ ] Netty EventLoop
+
 * [ ] Netty 기반 HTTP Server 분석
