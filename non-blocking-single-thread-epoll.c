@@ -12,25 +12,23 @@
 #include "http_parser.h"
 #include "http_request.h"
 #include "hashmap.h"
-#include "linked_list.h"
 #include "client.h"
 
 #define MAX_HEADERS 4096
 #define MAX_BODY 4096
 #define MAX_EVENTS 1024
 
-void disconnectClient(int epfd, LinkedList* clients, int client_fd) {
+void disconnectClient(int epfd, Client* client) {
   epoll_ctl(
     epfd,
     EPOLL_CTL_DEL,
-    client_fd,
+    client->client_fd,
     NULL
   );
 
-  close(client_fd);
+  close(client -> client_fd);
 
-  removeNode(clients, client_fd);
-
+  free(client);
   return;
 }
 
@@ -49,7 +47,7 @@ void setNonBlocking(int fd) {
 }
 
 // 작업 스레드가 처리할 작업
-void processClient(LinkedList* clients, Client* client, int epfd) {
+void processClient(Client* client, int epfd) {
   char *buffer = client->buffer;
   char *headers = client->headers;
   char *body = client->body;
@@ -73,14 +71,14 @@ void processClient(LinkedList* clients, Client* client, int epfd) {
     // 그 외 에러들
     perror("recv");
 
-    disconnectClient(epfd, clients, client->client_fd);
+    disconnectClient(epfd, client);
 
     return;
   }
 
   // 연결 종료
   else if (n == 0) {
-    disconnectClient(epfd, clients, client->client_fd);
+    disconnectClient(epfd, client);
     return;
   }
 
@@ -240,7 +238,7 @@ void processClient(LinkedList* clients, Client* client, int epfd) {
   }
 
   // http 1.0 기준으로 구현 했음
-  disconnectClient(epfd, clients, client->client_fd);
+  disconnectClient(epfd, client);
 
   return;
 }
@@ -249,10 +247,6 @@ void processClient(LinkedList* clients, Client* client, int epfd) {
 
 
 int main() {
-  // client_fd 리스트
-  LinkedList clients;
-  initList(&clients);
-
   // epoll 객체 생성
   int epfd = epoll_create1(0);
 
@@ -321,10 +315,15 @@ int main() {
       exit(1);
   }
 
+  // client 객체 생성
+  Client* listen_client;
+
+  listen_client.client_fd = listen_fd;
+
   // listen_fd 추가
   struct epoll_event event;
   event.events = EPOLLIN;
-  event.data.fd = listen_fd;
+  event.data.ptr = listen_client;
 
   if (epoll_ctl(epfd, EPOLL_CTL_ADD, listen_fd, &event) == -1) {
     perror("epoll_ctl");
@@ -353,20 +352,21 @@ int main() {
 
     // 연결된 모든 소켓들에 대해서 읽을 데이터 있는지 확인 후 파싱(listen socket은 제외)
     for (int i = 0; i < readableSocketCount; i++) {
-      if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+      Client* ev_client = events[i].data.ptr;
 
-        if(events[i].data.fd == listen_fd) {
+      if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+        if(ev_client->client_fd == listen_fd) {
           perror("listen socket error");
           exit(1);
         }
 
-        disconnectClient(epfd, &clients, events[i].data.fd);
+        disconnectClient(epfd, ev_client);
         continue;
       }
 
       // listen socket에서 읽을 데이터가 있으면 recv
-      if (events[i].data.fd == listen_fd) {
-        if (events[i].events & POLLIN) {
+      if (ev_client->client_fd == listen_fd) {
+        if (events[i].events & EPOLLIN) {
           while(1) {
             // listen socket 처리
             int client_fd = accept(
@@ -381,30 +381,28 @@ int main() {
               setNonBlocking(client_fd);
 
               // 연결 성공이면 client 구조체 생성
-              Client* client = malloc(sizeof(Client));
+              Client *new_client = malloc(sizeof(Client));
 
-              if (client == NULL) {
+              if (new_client == NULL) {
                 close(client_fd);
                 continue;
               }
               
-              initClient(client, client_fd);
+              initClient(new_client, client_fd);
 
               // 이벤트 객체에 추가(TODO: 이렇게 하면 원래 변수 덥어씌워지면서 생기는 문제는 없나)
               struct epoll_event client_event;
               client_event.events = EPOLLIN;
-              client_event.data.fd = client_fd;
+              client_event.data.ptr = new_client;
 
               if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &client_event) == -1) {
                 perror("epoll_ctl");
 
                 close(client_fd);
 
-                free(client);
+                free(new_client);
                 continue;
               }
-
-              addFirst(&clients, client);
             }
 
             // 연결 실패
@@ -421,14 +419,12 @@ int main() {
 
       // connected socket 처리
       else {
-        if (!(events[i].events & POLLIN)) {
+        if (!(events[i].events & EPOLLIN)) {
           continue;
         }
 
-        Client *client = findClient(&clients, events[i].data.fd);
-
-        if (client != NULL) {
-          processClient(&clients, client, epfd);
+        if (ev_client != NULL) {
+          processClient(ev_client, epfd);
         }
       }
     }

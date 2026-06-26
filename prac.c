@@ -308,3 +308,12 @@ if (n == 0) {
 }
 
 
+// ET 연습 문제
+struct epoll_event event;
+
+event.events - EPOLLIN | EPOLLET;
+event.data.fd = client_fd;
+
+
+
+
