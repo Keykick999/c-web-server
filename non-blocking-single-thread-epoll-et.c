@@ -59,184 +59,186 @@ void processClient(Client* client, int epfd) {
   HttpRequest *request = &client->request;
 
   // 소켓 recv 버퍼에서 데이터 읽기
-  int n = recv(client->client_fd, buffer, MAX_HEADERS - 1, 0);
+  while (1) {
+    int n = recv(client->client_fd, buffer, MAX_HEADERS - 1, 0);
 
-  // 오류
-  if (n < 0) {
-    // 소켓에서 읽을 데이터 없음
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    // 오류
+    if (n < 0) {
+      // 소켓에서 읽을 데이터 없음
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        break;
+      }
+
+      // 그 외 에러들
+      perror("recv");
+
+      disconnectClient(epfd, client);
+
       return;
     }
 
-    // 그 외 에러들
-    perror("recv");
+    // 연결 종료
+    else if (n == 0) {
+      disconnectClient(epfd, client);
+      return;
+    }
 
-    disconnectClient(epfd, client);
+    // 데이터 정상적으로 읽음
+    else if (n > 0) {
+      // 헤더 읽어야 하는 차례
+      if (*contentLength == -1) {
 
-    return;
-  }
-
-  // 연결 종료
-  else if (n == 0) {
-    disconnectClient(epfd, client);
-    return;
-  }
-
-  // 데이터 정상적으로 읽음
-  else if (n > 0) {
-    // 헤더 읽어야 하는 차례
-    if (*contentLength == -1) {
-
-      // buffer에 있는 값 헤더로 옮기기
-      memcpy(
-        headers + *header_len,
-        buffer,
-        n
-      );
-
-      *header_len += n;
-      headers[*header_len] = '\0';
-
-      // header 끝(\r\n\r\n) 찾기
-      char* headerEnd = strstr(
-        headers,
-        "\r\n\r\n"
-      );
-
-      // 아직 header 안 끝남
-      if (headerEnd == NULL) {
-        return;
-      }
-
-      // 실제 header 크기 계산
-      int headerSize =
-        headerEnd - headers + 4;
-
-      // 1. 헤더 파싱
-      char* headerStart =
-        parseRequestLine(
-          request,
-          headers
+        // buffer에 있는 값 헤더로 옮기기
+        memcpy(
+          headers + *header_len,
+          buffer,
+          n
         );
 
-      parseHeaders(
-        request,
-        headerStart
-      );
+        *header_len += n;
+        headers[*header_len] = '\0';
 
-      // 2. 헤더에 content-length라는 필드 있나 확인
-      char* contentLengthHeader =
-        get(
-          request->headers,
-          "Content-Length"
+        // header 끝(\r\n\r\n) 찾기
+        char* headerEnd = strstr(
+          headers,
+          "\r\n\r\n"
         );
 
-      // 3. 헤더에 content-length 있으면 저장해두기
-      if (contentLengthHeader != NULL) {
-        *contentLength =
-          atoi(contentLengthHeader);
-      }
-      else {
-        *contentLength = 0;
-      }
+        // 아직 header 안 끝남
+        if (headerEnd == NULL) {
+          continue;
+        }
 
-      // body 없음
-      if (*contentLength == 0) {
-        body[0] = '\0';
-      }
+        // 실제 header 크기 계산
+        int headerSize =
+          headerEnd - headers + 4;
 
-      // body 있음
-      else if (*contentLength > 0) {
-
-        // 이미 읽혀 있는 body 크기(header 버퍼에 복사된 길이 - 실제 헤더 길이)
-        int remain = *header_len - headerSize;
-
-        if (remain > 0) {
-
-          // 남은 값들 body buffer에 넣어두기
-          memcpy(
-            body + *body_len,
-            headerEnd + 4,
-            remain
+        // 1. 헤더 파싱
+        char* headerStart =
+          parseRequestLine(
+            request,
+            headers
           );
 
-          *body_len += remain;
+        parseHeaders(
+          request,
+          headerStart
+        );
+
+        // 2. 헤더에 content-length라는 필드 있나 확인
+        char* contentLengthHeader =
+          get(
+            request->headers,
+            "Content-Length"
+          );
+
+        // 3. 헤더에 content-length 있으면 저장해두기
+        if (contentLengthHeader != NULL) {
+          *contentLength =
+            atoi(contentLengthHeader);
         }
+        else {
+          *contentLength = 0;
+        }
+
+        // body 없음
+        if (*contentLength == 0) {
+          body[0] = '\0';
+        }
+
+        // body 있음
+        else if (*contentLength > 0) {
+
+          // 이미 읽혀 있는 body 크기(header 버퍼에 복사된 길이 - 실제 헤더 길이)
+          int remain = *header_len - headerSize;
+
+          if (remain > 0) {
+
+            // 남은 값들 body buffer에 넣어두기
+            memcpy(
+              body + *body_len,
+              headerEnd + 4,
+              remain
+            );
+
+            *body_len += remain;
+          }
+        }
+      }
+
+      // body 읽어야 하는 차례
+      else if (*contentLength > 0) {
+        // 읽어온 값들 body buffer에 넣기
+        memcpy(
+          body + *body_len,
+          buffer,
+          n
+        );
+
+        *body_len += n;
       }
     }
 
-    // body 읽어야 하는 차례
-    else if (*contentLength > 0) {
-      // 읽어온 값들 body buffer에 넣기
-      memcpy(
-        body + *body_len,
-        buffer,
-        n
+    // if (n == 0) {
+    //   printf("client disconnected\n");
+    // }
+    // else if (n < 0) {
+    //   perror("recv");
+    // }
+
+    // body 다 안 읽었으면 continue
+    if (*contentLength > 0 && *body_len < *contentLength) {
+      continue;
+    }
+
+    // 바디 파싱
+    body[*body_len] = '\0';
+    parseBody(request, body);
+
+    print_map(request->headers);
+    print_map(request->body);
+
+    if (strcmp(request->method, "GET") == 0 && strcmp(request->path, "/hello") == 0 
+      && strcmp(request->version, "HTTP/1.1") == 0) {
+      char response[] =
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 11\r\n"
+      "\r\n"
+      "Get Hello World";
+
+      int sent = send(
+        client->client_fd,
+        response,
+        strlen(response),
+        0
       );
 
-      *body_len += n;
+      if (sent < 0) {
+        perror("send");
+      }
+    }
+
+    else if (strcmp(request->method, "POST") == 0 && strcmp(request->path, "/hello") == 0 
+      && strcmp(request->version, "HTTP/1.1") == 0) {
+      char response[] =
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Length: 11\r\n"
+      "\r\n"
+      "Post Hello World";
+
+      int sent = send(
+        client->client_fd,
+        response,
+        strlen(response),
+        0
+      );
+
+      if (sent < 0) {
+        perror("send");
+      }
     }
   }
-
-  // if (n == 0) {
-  //   printf("client disconnected\n");
-  // }
-  // else if (n < 0) {
-  //   perror("recv");
-  // }
-
-  // body 다 안 읽었으면 return
-  if (*contentLength > 0 && *body_len < *contentLength) {
-    return;
-  }
-
-  // 바디 파싱
-  body[*body_len] = '\0';
-  parseBody(request, body);
-
-  print_map(request->headers);
-  print_map(request->body);
-
-  if (strcmp(request->method, "GET") == 0 && strcmp(request->path, "/hello") == 0 
-    && strcmp(request->version, "HTTP/1.1") == 0) {
-    char response[] =
-    "HTTP/1.1 200 OK\r\n"
-    "Content-Length: 11\r\n"
-    "\r\n"
-    "Get Hello World";
-
-    int sent = send(
-      client->client_fd,
-      response,
-      strlen(response),
-      0
-    );
-
-    if (sent < 0) {
-      perror("send");
-    }
-  }
-
-  else if (strcmp(request->method, "POST") == 0 && strcmp(request->path, "/hello") == 0 
-    && strcmp(request->version, "HTTP/1.1") == 0) {
-    char response[] =
-    "HTTP/1.1 200 OK\r\n"
-    "Content-Length: 11\r\n"
-    "\r\n"
-    "Post Hello World";
-
-    int sent = send(
-      client->client_fd,
-      response,
-      strlen(response),
-      0
-    );
-
-    if (sent < 0) {
-      perror("send");
-    }
-  }
-
+  
   // http 1.0 기준으로 구현 했음
   disconnectClient(epfd, client);
 
@@ -392,7 +394,7 @@ int main() {
 
               // 이벤트 객체에 추가(TODO: 이렇게 하면 원래 변수 덥어씌워지면서 생기는 문제는 없나)
               struct epoll_event client_event;
-              client_event.events = EPOLLIN;
+              client_event.events = EPOLLIN | EPOLLET;
               client_event.data.ptr = new_client;
 
               if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &client_event) == -1) {
